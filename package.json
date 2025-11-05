@@ -1,0 +1,79 @@
+{
+  "name": "@switchx/apps-sdk",
+  "version": "1.0.0",
+  "description": "Official SwitchX Apps SDK - Simple API for building AI-powered mini apps on SwitchX",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./core": {
+      "require": "./dist/core/index.js",
+      "import": "./dist/core/index.mjs",
+      "types": "./dist/core/index.d.ts"
+    },
+    "./server": {
+      "require": "./dist/server/index.js",
+      "import": "./dist/server/index.mjs",
+      "types": "./dist/server/index.d.ts"
+    },
+    "./react": {
+      "require": "./dist/react/index.js",
+      "import": "./dist/react/index.mjs",
+      "types": "./dist/react/index.d.ts"
+    },
+    "./types": {
+      "require": "./dist/types/index.js",
+      "import": "./dist/types/index.mjs",
+      "types": "./dist/types/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "switchx",
+    "sdk",
+    "api",
+    "ai",
+    "community",
+    "chat",
+    "notifications"
+  ],
+  "author": "SwitchX",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/new-dev0/switchx-apps-sdk"
+  },
+  "homepage": "https://switchx.gg",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "form-data": "^4.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=16.8.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "react": "^18.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}
