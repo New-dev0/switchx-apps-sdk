@@ -16,6 +16,7 @@ import type { UserInfo } from '../types';
  */
 interface SwitchXWebApp {
   getAuthToken(): { token: string; userId: string } | null;
+  getCommunityInfo?(): { id: string; name: string } | null;
   clearData(): void;
 }
 
@@ -142,9 +143,10 @@ export function SwitchXAuthProvider({
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userLoading, setUserLoading] = useState(false);
+  const [communityId, setCommunityId] = useState<string | null>(null);
 
-  // Create API client instance
-  const client = token ? new SwitchXCore(token) : null;
+  // Create API client instance with communityId if available
+  const client = token ? new SwitchXCore(token, communityId || undefined) : null;
 
   /**
    * Fetch user information using the stored token and userId
@@ -211,11 +213,16 @@ export function SwitchXAuthProvider({
         const storedUser = localStorage.getItem('switchx_user');
 
         if (storedAuth) {
-          const { token: storedToken, userId: storedUserId } = JSON.parse(storedAuth);
+          const { token: storedToken, userId: storedUserId, communityId: storedCommunityId } = JSON.parse(storedAuth);
           if (storedToken && storedUserId) {
             setToken(storedToken);
             setUserId(storedUserId);
             setIsAuthenticated(true);
+
+            // Set communityId if available
+            if (storedCommunityId) {
+              setCommunityId(storedCommunityId);
+            }
 
             // Load cached user data if available and not expired
             if (storedUser) {
@@ -251,16 +258,23 @@ export function SwitchXAuthProvider({
       // Check SwitchX bridge (may override localStorage)
       if (window.SwitchX?.WebApp) {
         const authData = window.SwitchX.WebApp.getAuthToken();
+        const communityInfo = window.SwitchX.WebApp.getCommunityInfo?.();
 
         if (authData?.token && authData?.userId) {
           setToken(prev => prev === authData.token ? prev : authData.token);
           setUserId(prev => prev === authData.userId ? prev : authData.userId);
           setIsAuthenticated(true);
 
+          // Set communityId if available
+          if (communityInfo?.id) {
+            setCommunityId(communityInfo.id);
+          }
+
           // Store in localStorage
           localStorage.setItem('switchx_auth', JSON.stringify({
             token: authData.token,
-            userId: authData.userId
+            userId: authData.userId,
+            communityId: communityInfo?.id
           }));
 
           console.log('[SwitchXAuth] Auth loaded from SwitchX bridge');
@@ -276,6 +290,7 @@ export function SwitchXAuthProvider({
 
       if (typeof window !== 'undefined' && window.SwitchX?.WebApp) {
         const authData = window.SwitchX.WebApp.getAuthToken();
+        const communityInfo = window.SwitchX.WebApp.getCommunityInfo?.();
 
         if (authData?.token && authData?.userId) {
           setToken(prev => prev === authData.token ? prev : authData.token);
@@ -283,10 +298,16 @@ export function SwitchXAuthProvider({
           setIsAuthenticated(true);
           setLoading(false);
 
+          // Set communityId if available
+          if (communityInfo?.id) {
+            setCommunityId(communityInfo.id);
+          }
+
           // Store in localStorage
           localStorage.setItem('switchx_auth', JSON.stringify({
             token: authData.token,
-            userId: authData.userId
+            userId: authData.userId,
+            communityId: communityInfo?.id
           }));
 
           console.log('[SwitchXAuth] Auth loaded from event');
@@ -332,16 +353,23 @@ export function SwitchXAuthProvider({
       setLoading(true);
 
       const authData = window.SwitchX.WebApp.getAuthToken();
+      const communityInfo = window.SwitchX.WebApp.getCommunityInfo?.();
 
       if (authData?.token && authData?.userId) {
         setToken(prev => prev === authData.token ? prev : authData.token);
         setUserId(prev => prev === authData.userId ? prev : authData.userId);
         setIsAuthenticated(true);
 
+        // Set communityId if available
+        if (communityInfo?.id) {
+          setCommunityId(communityInfo.id);
+        }
+
         // Store in localStorage
         localStorage.setItem('switchx_auth', JSON.stringify({
           token: authData.token,
-          userId: authData.userId
+          userId: authData.userId,
+          communityId: communityInfo?.id
         }));
 
         console.log('[SwitchXAuth] ✅ Auth refreshed from parent');

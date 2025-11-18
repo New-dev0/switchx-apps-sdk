@@ -124,13 +124,126 @@ export class SwitchXServer extends SwitchXCore {
   }
 
   /**
-   * Send a notification (placeholder - implement when API is available)
-   * Server-only operation requiring privileged token
+   * Check if a user can receive notifications
+   * Currently returns true always (API not implemented yet)
+   *
+   * @param userId - User ID to check
+   * @returns boolean - true if can send, false otherwise
+   *
+   * @example
+   * const canSend = await client.canSendNotification('12345');
+   * if (canSend) {
+   *   await client.sendNotification({ ... });
+   * }
+   */
+  async canSendNotification(_userId: string): Promise<boolean> {
+    // TODO: Implement API check when backend endpoint is ready
+    return true;
+  }
+
+  /**
+   * Send FCM notification to a user
+   * Server-only operation requiring miniapp token
+   *
+   * @param options - Notification configuration
+   * @throws Error if notification fails to send
+   *
+   * @example
+   * await client.sendNotification({
+   *   userId: '12345',
+   *   notificationType: 'MINIAPP_ALERT',
+   *   title: 'New Update',
+   *   message: 'Check out the latest features!',
+   *   communityId: 'community-id',
+   *   image: 'https://example.com/icon.png',
+   *   customData: { action: 'view_update' }
+   * });
    */
   async sendNotification(options: NotificationOptions): Promise<void> {
-    // TODO: Implement when notification API endpoint is available
-    console.log('Sending notification:', options);
-    throw new Error('Notification API not yet implemented - please check SwitchX documentation');
+    try {
+      // Map camelCase to snake_case for backend API
+      const payload = {
+        user_id: options.userId,
+        notification_type: options.notificationType,
+        title: options.title,
+        message: options.message,
+        community_id: options.communityId,
+        ...(options.image && { image: options.image }),
+        ...(options.actionBy && { action_by: options.actionBy }),
+        ...(options.actionByUsername && { action_by_username: options.actionByUsername }),
+        ...(options.actionByImage && { action_by_image: options.actionByImage }),
+        ...(options.customData && { custom_data: options.customData })
+      };
+
+      const response = await axios.post(
+        'https://de.switchx.dev/api/miniapp/send-notification-fcm',
+        payload,
+        {
+          headers: {
+            'Authorization': this.getToken(),
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      );
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'Failed to send notification');
+      }
+    } catch (error: any) {
+      if (error.response) {
+        const detail = error.response.data?.detail || error.response.statusText;
+        throw new Error(`Failed to send notification: ${detail}`);
+      }
+      throw new Error(`Failed to send notification: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get miniapp project information (basic metadata only)
+   * Returns info about the current miniapp (requires miniapp token with project_id)
+   *
+   * @returns Basic project metadata
+   *
+   * @example
+   * const appInfo = await client.getAppInfo();
+   * console.log(appInfo.name, appInfo.description, appInfo.productionUrl);
+   */
+  async getAppInfo(): Promise<{
+    name: string;
+    description: string;
+    emoji: any;
+    createdBy: number;
+    productionUrl: string | null;
+  }> {
+    try {
+      const response = await axios.get(
+        'https://de.switchx.dev/api/mcp/project',
+        {
+          headers: {
+            'Authorization': this.getToken()
+          },
+          timeout: 10000
+        }
+      );
+
+      const data = response.data;
+
+      // Return only basic metadata
+      return {
+        name: data.name,
+        description: data.description,
+        emoji: data.emoji,
+        createdBy: data.created_by,
+        productionUrl: data.deployment_meta?.production_url || null
+      };
+    } catch (error: any) {
+      if (error.response) {
+        const detail = error.response.data?.detail || error.response.statusText;
+        throw new Error(`Failed to get app info: ${detail}`);
+      }
+      throw new Error(`Failed to get app info: ${error.message}`);
+    }
   }
 
   // ===== AI Operations are inherited from Core =====

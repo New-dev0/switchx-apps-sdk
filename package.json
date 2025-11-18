@@ -1,6 +1,6 @@
 {
   "name": "@switchx/apps-sdk",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Official SwitchX Apps SDK - Simple API for building AI-powered mini apps on SwitchX",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

@@ -57,12 +57,16 @@ export interface ChatHistory {
 }
 
 export interface NotificationOptions {
+  userId: string | number;
+  notificationType: string;  // e.g., "AI_MESSAGE", "MINIAPP_ALERT", "SYSTEM_NOTIFICATION"
   title: string;
   message: string;
-  channelId?: string;
-  groupId?: string;
-  userIds?: string[];
-  imageUrl?: string;
+  communityId: string;
+  image?: string;
+  actionBy?: string;
+  actionByUsername?: string;
+  actionByImage?: string;
+  customData?: Record<string, any>;
 }
 
 export interface PaginationOptions {
