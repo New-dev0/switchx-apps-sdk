@@ -27,10 +27,9 @@ export class SwitchXServer extends SwitchXCore {
   /**
    * Create server SDK instance with MINIAPPS_TOKEN
    * @param token - Server/bot token (MINIAPPS_TOKEN from env)
-   * @param defaultCommunityId - Optional default community ID
    */
-  constructor(token: string, defaultCommunityId?: string) {
-    super(token, defaultCommunityId);
+  constructor(token: string) {
+    super(token);
   }
 
   // ===== All core READ methods are inherited automatically! =====
@@ -261,17 +260,12 @@ export class SwitchXServer extends SwitchXCore {
  * const client = createServerClient();
  *
  * // Or pass token explicitly
- * const client = createServerClient({
- *   token: process.env.MINIAPPS_TOKEN,
- *   communityId: 'community-id'
- * });
+ * const client = createServerClient({ token: process.env.MINIAPPS_TOKEN });
  */
 export function createServerClient(config?: {
   token?: string;
-  communityId?: string;
 }): SwitchXServer {
   const token = config?.token || process.env.SWITCHX_TOKEN || process.env.MINIAPPS_TOKEN;
-  const communityId = config?.communityId || process.env.SWITCHX_COMMUNITY_ID;
 
   if (!token) {
     throw new Error(
@@ -279,7 +273,7 @@ export function createServerClient(config?: {
     );
   }
 
-  return new SwitchXServer(token, communityId);
+  return new SwitchXServer(token);
 }
 
 // Re-export core types

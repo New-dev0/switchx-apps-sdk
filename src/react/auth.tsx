@@ -6,7 +6,7 @@
 
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { SwitchXCore } from '../core';
 import type { UserInfo } from '../types';
 
@@ -39,6 +39,7 @@ interface SwitchXAuthContextValue {
   isAuthenticated: boolean;
   loading: boolean;
   userLoading: boolean;
+  communityId: string | null;
 
   // Auth actions
   refreshAuthFromParent: () => Promise<boolean>;
@@ -126,6 +127,12 @@ interface SwitchXAuthProviderProps {
    * Default: true
    */
   notifyParent?: boolean;
+  /**
+   * Allowed parent origin for postMessage security
+   * Default: '*' (not recommended for production)
+   * Example: 'https://switchx.gg'
+   */
+  parentOrigin?: string;
 }
 
 /**
@@ -135,7 +142,8 @@ interface SwitchXAuthProviderProps {
 export function SwitchXAuthProvider({
   children,
   onAuthChange,
-  notifyParent = true
+  notifyParent = true,
+  parentOrigin = '*'
 }: SwitchXAuthProviderProps) {
   const [token, setToken] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -145,19 +153,59 @@ export function SwitchXAuthProvider({
   const [userLoading, setUserLoading] = useState(false);
   const [communityId, setCommunityId] = useState<string | null>(null);
 
-  // Create API client instance with communityId if available
-  const client = token ? new SwitchXCore(token, communityId || undefined) : null;
+  /**
+   * Auto-inject SwitchX bridge script if not already loaded
+   * Loads from CDN: https://www.switchx.gg/switchx-app-bridge.js
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Check if bridge already exists
+    if (window.SwitchX?.WebApp) {
+      console.log('[SwitchXAuth] Bridge already loaded');
+      return;
+    }
+
+    // Check if script is already in DOM
+    const existingScript = document.querySelector('script[src*="switchx-app-bridge.js"]');
+    if (existingScript) {
+      console.log('[SwitchXAuth] Bridge script already in DOM, waiting for load...');
+      return;
+    }
+
+    // Inject bridge script
+    console.log('[SwitchXAuth] Injecting bridge script from CDN...');
+    const script = document.createElement('script');
+    script.src = 'https://www.switchx.gg/switchx-app-bridge.js';
+    script.async = false; // Load synchronously to ensure bridge is ready
+    script.onload = () => {
+      console.log('[SwitchXAuth] Bridge script loaded successfully');
+    };
+    script.onerror = () => {
+      console.error('[SwitchXAuth] Failed to load bridge script from CDN');
+    };
+    document.head.appendChild(script);
+  }, []); // Run once on mount
+
+  // Create API client instance (memoized to avoid recreating on every render)
+  const client = useMemo(() => {
+    return token ? new SwitchXCore(token) : null;
+  }, [token]);
 
   /**
    * Fetch user information using the stored token and userId
    */
-  const fetchUserInfo = useCallback(async (): Promise<boolean> => {
+  const fetchUserInfo = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     if (!token || !userId) return false;
 
     try {
       setUserLoading(true);
       const client = new SwitchXCore(token);
       const userInfo = await client.getUser(userId);
+
+      // Check if aborted before updating state
+      if (signal?.aborted) return false;
+
       setUser(userInfo);
 
       // Cache user data in localStorage with timestamp
@@ -170,17 +218,23 @@ export function SwitchXAuthProvider({
 
       return true;
     } catch (error) {
+      if (signal?.aborted) return false;
       console.error('Failed to fetch user info:', error);
       return false;
     } finally {
-      setUserLoading(false);
+      if (!signal?.aborted) {
+        setUserLoading(false);
+      }
     }
   }, [token, userId]);
 
   /**
    * Notify parent window when authentication state changes
+   * Memoized with useRef to avoid dependency issues
    */
-  const notifyParentAuth = useCallback((authenticated: boolean) => {
+  const notifyParentAuthRef = React.useRef<(authenticated: boolean) => void>();
+
+  notifyParentAuthRef.current = (authenticated: boolean) => {
     if (!notifyParent) return;
 
     if (typeof window !== 'undefined' && window.parent !== window) {
@@ -189,7 +243,7 @@ export function SwitchXAuthProvider({
           type: 'miniapp_auth_changed',
           isAuthenticated: authenticated,
           timestamp: Date.now()
-        }, '*');
+        }, parentOrigin);
         console.log('[SwitchXAuth] Notified parent of auth state:', authenticated);
       } catch (e) {
         console.warn('[SwitchXAuth] Failed to notify parent:', e);
@@ -198,7 +252,11 @@ export function SwitchXAuthProvider({
 
     // Call user callback
     onAuthChange?.(authenticated);
-  }, [notifyParent, onAuthChange]);
+  };
+
+  const notifyParentAuth = useCallback((authenticated: boolean) => {
+    notifyParentAuthRef.current?.(authenticated);
+  }, []);
 
   /**
    * Load auth from SwitchX bridge on initial render
@@ -206,6 +264,8 @@ export function SwitchXAuthProvider({
   useEffect(() => {
     const initAuth = () => {
       if (typeof window === 'undefined') return;
+
+      let shouldNotifyParent = false;
 
       // Try to load from localStorage first (fast)
       try {
@@ -233,8 +293,8 @@ export function SwitchXAuthProvider({
 
                 if (!isExpired && userData) {
                   setUser(userData);
+                  shouldNotifyParent = true; // Only notify if we have complete auth + user
                   console.log('[SwitchXAuth] Auth + user loaded from cache (instant)');
-                  notifyParentAuth(true);
                 } else {
                   if (isExpired) {
                     console.log('[SwitchXAuth] Cached user data expired, will fetch fresh');
@@ -261,8 +321,8 @@ export function SwitchXAuthProvider({
         const communityInfo = window.SwitchX.WebApp.getCommunityInfo?.();
 
         if (authData?.token && authData?.userId) {
-          setToken(prev => prev === authData.token ? prev : authData.token);
-          setUserId(prev => prev === authData.userId ? prev : authData.userId);
+          setToken(authData.token);
+          setUserId(authData.userId);
           setIsAuthenticated(true);
 
           // Set communityId if available
@@ -282,6 +342,11 @@ export function SwitchXAuthProvider({
       }
 
       setLoading(false);
+
+      // Notify parent after all setup is complete (only if we have cached user)
+      if (shouldNotifyParent) {
+        notifyParentAuth(true);
+      }
     };
 
     // Listen for switch-bridge auth ready event
@@ -293,8 +358,8 @@ export function SwitchXAuthProvider({
         const communityInfo = window.SwitchX.WebApp.getCommunityInfo?.();
 
         if (authData?.token && authData?.userId) {
-          setToken(prev => prev === authData.token ? prev : authData.token);
-          setUserId(prev => prev === authData.userId ? prev : authData.userId);
+          setToken(authData.token);
+          setUserId(authData.userId);
           setIsAuthenticated(true);
           setLoading(false);
 
@@ -325,20 +390,35 @@ export function SwitchXAuthProvider({
   }, [notifyParentAuth]);
 
   /**
-   * Fetch user info when token/userId change, then notify parent
+   * Fetch user info when token/userId change, then notify parent (only once)
    */
   useEffect(() => {
-    if (isAuthenticated && token && userId && !user) {
-      fetchUserInfo().then((success) => {
-        if (success) {
-          notifyParentAuth(true);
-          console.log('[SwitchXAuth] ✅ Auth complete with user data - notified parent');
-        }
-      });
-    } else if (!isAuthenticated) {
+    if (!isAuthenticated || !token || !userId || user) {
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    fetchUserInfo(abortController.signal).then((success) => {
+      if (success && !abortController.signal.aborted) {
+        notifyParentAuth(true);
+        console.log('[SwitchXAuth] ✅ Auth complete with user data - notified parent');
+      }
+    });
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isAuthenticated, token, userId, user, fetchUserInfo, notifyParentAuth]);
+
+  /**
+   * Clear user when not authenticated
+   */
+  useEffect(() => {
+    if (!isAuthenticated && user) {
       setUser(null);
     }
-  }, [isAuthenticated, token, userId, user, fetchUserInfo, notifyParentAuth]);
+  }, [isAuthenticated, user]);
 
   /**
    * Refresh auth token from parent app
@@ -356,8 +436,8 @@ export function SwitchXAuthProvider({
       const communityInfo = window.SwitchX.WebApp.getCommunityInfo?.();
 
       if (authData?.token && authData?.userId) {
-        setToken(prev => prev === authData.token ? prev : authData.token);
-        setUserId(prev => prev === authData.userId ? prev : authData.userId);
+        setToken(authData.token);
+        setUserId(authData.userId);
         setIsAuthenticated(true);
 
         // Set communityId if available
@@ -421,6 +501,7 @@ export function SwitchXAuthProvider({
     refreshUserInfo: fetchUserInfo,
     isEmbedded: typeof window !== 'undefined' && !!window.SwitchX?.WebApp,
     client,
+    communityId,
   };
 
   return (

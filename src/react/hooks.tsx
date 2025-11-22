@@ -27,20 +27,24 @@ interface UseQueryResult<T> {
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
+  communityId?: string | null;
 }
 
 /**
  * Hook to get community information
  * Uses token from AuthContext automatically
+ * If no communityId provided, uses communityId from auth context
  */
 export function useCommunity(communityId?: string): UseQueryResult<CommunityInfo> {
-  const { client } = useAuth();
+  const { client, communityId: contextCommunityId } = useAuth();
+  const effectiveCommunityId = communityId ?? contextCommunityId;
+
   const [data, setData] = useState<CommunityInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!client) {
+    if (!client || !effectiveCommunityId) {
       setData(null);
       return;
     }
@@ -48,7 +52,7 @@ export function useCommunity(communityId?: string): UseQueryResult<CommunityInfo
     try {
       setLoading(true);
       setError(null);
-      const result = await client.getCommunity(communityId);
+      const result = await client.getCommunity(effectiveCommunityId);
       setData(result);
     } catch (err: any) {
       console.error('Failed to fetch community:', err);
@@ -57,26 +61,29 @@ export function useCommunity(communityId?: string): UseQueryResult<CommunityInfo
     } finally {
       setLoading(false);
     }
-  }, [client, communityId]);
+  }, [client, effectiveCommunityId]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  return { data, loading, error, refetch: fetchData };
+  return { data, loading, error, refetch: fetchData, communityId: effectiveCommunityId };
 }
 
 /**
  * Hook to get community members
+ * If no communityId provided, uses communityId from auth context
  */
 export function useMembers(communityId?: string): UseQueryResult<CommunityMember[]> {
-  const { client } = useAuth();
+  const { client, communityId: contextCommunityId } = useAuth();
+  const effectiveCommunityId = communityId ?? contextCommunityId;
+
   const [data, setData] = useState<CommunityMember[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!client) {
+    if (!client || !effectiveCommunityId) {
       setData(null);
       return;
     }
@@ -84,7 +91,7 @@ export function useMembers(communityId?: string): UseQueryResult<CommunityMember
     try {
       setLoading(true);
       setError(null);
-      const result = await client.getMembers(communityId);
+      const result = await client.getMembers(effectiveCommunityId);
       setData(result);
     } catch (err: any) {
       console.error('Failed to fetch members:', err);
@@ -93,7 +100,7 @@ export function useMembers(communityId?: string): UseQueryResult<CommunityMember
     } finally {
       setLoading(false);
     }
-  }, [client, communityId]);
+  }, [client, effectiveCommunityId]);
 
   useEffect(() => {
     fetchData();
@@ -140,15 +147,18 @@ export function useUser(userId?: string): UseQueryResult<UserInfo> {
 
 /**
  * Hook to get channels
+ * If no communityId provided, uses communityId from auth context
  */
 export function useChannels(communityId?: string): UseQueryResult<Channel[]> {
-  const { client } = useAuth();
+  const { client, communityId: contextCommunityId } = useAuth();
+  const effectiveCommunityId = communityId ?? contextCommunityId;
+
   const [data, setData] = useState<Channel[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!client) {
+    if (!client || !effectiveCommunityId) {
       setData(null);
       return;
     }
@@ -156,7 +166,7 @@ export function useChannels(communityId?: string): UseQueryResult<Channel[]> {
     try {
       setLoading(true);
       setError(null);
-      const result = await client.getChannels(communityId);
+      const result = await client.getChannels(effectiveCommunityId);
       setData(result);
     } catch (err: any) {
       console.error('Failed to fetch channels:', err);
@@ -165,7 +175,7 @@ export function useChannels(communityId?: string): UseQueryResult<Channel[]> {
     } finally {
       setLoading(false);
     }
-  }, [client, communityId]);
+  }, [client, effectiveCommunityId]);
 
   useEffect(() => {
     fetchData();
@@ -176,15 +186,18 @@ export function useChannels(communityId?: string): UseQueryResult<Channel[]> {
 
 /**
  * Hook to get groups
+ * If no communityId provided, uses communityId from auth context
  */
 export function useGroups(communityId?: string): UseQueryResult<Group[]> {
-  const { client } = useAuth();
+  const { client, communityId: contextCommunityId } = useAuth();
+  const effectiveCommunityId = communityId ?? contextCommunityId;
+
   const [data, setData] = useState<Group[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!client) {
+    if (!client || !effectiveCommunityId) {
       setData(null);
       return;
     }
@@ -192,7 +205,7 @@ export function useGroups(communityId?: string): UseQueryResult<Group[]> {
     try {
       setLoading(true);
       setError(null);
-      const result = await client.getGroups(communityId);
+      const result = await client.getGroups(effectiveCommunityId);
       setData(result);
     } catch (err: any) {
       console.error('Failed to fetch groups:', err);
@@ -201,7 +214,7 @@ export function useGroups(communityId?: string): UseQueryResult<Group[]> {
     } finally {
       setLoading(false);
     }
-  }, [client, communityId]);
+  }, [client, effectiveCommunityId]);
 
   useEffect(() => {
     fetchData();
@@ -212,10 +225,12 @@ export function useGroups(communityId?: string): UseQueryResult<Group[]> {
 
 /**
  * Hook to get channel messages
+ * Requires both channelId and communityId
  */
 export function useChannelMessages(
   channelId: string | undefined,
-  options?: PaginationOptions & { communityId?: string }
+  communityId: string,
+  options?: PaginationOptions
 ): UseQueryResult<ChatHistory> {
   const { client } = useAuth();
   const [data, setData] = useState<ChatHistory | null>(null);
@@ -223,7 +238,7 @@ export function useChannelMessages(
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!client || !channelId) {
+    if (!client || !channelId || !communityId) {
       setData(null);
       return;
     }
@@ -231,7 +246,7 @@ export function useChannelMessages(
     try {
       setLoading(true);
       setError(null);
-      const result = await client.getChannelMessages(channelId, options);
+      const result = await client.getChannelMessages(channelId, communityId, options);
       setData(result);
     } catch (err: any) {
       console.error('Failed to fetch channel messages:', err);
@@ -240,7 +255,7 @@ export function useChannelMessages(
     } finally {
       setLoading(false);
     }
-  }, [client, channelId, JSON.stringify(options)]);
+  }, [client, channelId, communityId, JSON.stringify(options)]);
 
   useEffect(() => {
     fetchData();
@@ -251,10 +266,12 @@ export function useChannelMessages(
 
 /**
  * Hook to get group messages
+ * Requires both groupId and communityId
  */
 export function useGroupMessages(
   groupId: string | undefined,
-  options?: PaginationOptions & { communityId?: string }
+  communityId: string,
+  options?: PaginationOptions
 ): UseQueryResult<ChatHistory> {
   const { client } = useAuth();
   const [data, setData] = useState<ChatHistory | null>(null);
@@ -262,7 +279,7 @@ export function useGroupMessages(
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!client || !groupId) {
+    if (!client || !groupId || !communityId) {
       setData(null);
       return;
     }
@@ -270,7 +287,7 @@ export function useGroupMessages(
     try {
       setLoading(true);
       setError(null);
-      const result = await client.getGroupMessages(groupId, options);
+      const result = await client.getGroupMessages(groupId, communityId, options);
       setData(result);
     } catch (err: any) {
       console.error('Failed to fetch group messages:', err);
@@ -279,7 +296,7 @@ export function useGroupMessages(
     } finally {
       setLoading(false);
     }
-  }, [client, groupId, JSON.stringify(options)]);
+  }, [client, groupId, communityId, JSON.stringify(options)]);
 
   useEffect(() => {
     fetchData();
@@ -290,10 +307,12 @@ export function useGroupMessages(
 
 /**
  * Hook to search messages
+ * Requires both searchString and communityId
  */
 export function useSearchMessages(
   searchString: string | undefined,
-  options?: SearchOptions & { communityId?: string }
+  communityId: string,
+  options?: SearchOptions
 ): UseQueryResult<Message[]> {
   const { client } = useAuth();
   const [data, setData] = useState<Message[] | null>(null);
@@ -301,7 +320,7 @@ export function useSearchMessages(
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!client || !searchString) {
+    if (!client || !searchString || !communityId) {
       setData(null);
       return;
     }
@@ -309,7 +328,7 @@ export function useSearchMessages(
     try {
       setLoading(true);
       setError(null);
-      const result = await client.searchMessages(searchString, options);
+      const result = await client.searchMessages(searchString, communityId, options);
       setData(result);
     } catch (err: any) {
       console.error('Failed to search messages:', err);
@@ -318,7 +337,7 @@ export function useSearchMessages(
     } finally {
       setLoading(false);
     }
-  }, [client, searchString, JSON.stringify(options)]);
+  }, [client, searchString, communityId, JSON.stringify(options)]);
 
   useEffect(() => {
     fetchData();
@@ -329,10 +348,11 @@ export function useSearchMessages(
 
 /**
  * Hook to check if a user is admin
+ * Requires both userId and communityId
  */
 export function useIsAdmin(
   userId: string | undefined,
-  communityId?: string
+  communityId: string
 ): UseQueryResult<boolean> {
   const { client } = useAuth();
   const [data, setData] = useState<boolean | null>(null);
@@ -340,7 +360,7 @@ export function useIsAdmin(
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!client || !userId) {
+    if (!client || !userId || !communityId) {
       setData(null);
       return;
     }

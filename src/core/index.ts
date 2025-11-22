@@ -31,19 +31,16 @@ const SWITCH_UPLOAD_URL = "https://de.switchx.dev/upload/stream";
  */
 export class SwitchXCore {
   private authToken: string;
-  private defaultCommunityId?: string;
 
   /**
    * Create a new SwitchX client
    * @param token - User authentication token (from SwitchX WebApp)
-   * @param defaultCommunityId - Optional default community ID
    */
-  constructor(token: string, defaultCommunityId?: string) {
+  constructor(token: string) {
     if (!token) {
       throw new Error('Token is required. Pass user token from SwitchX WebApp.');
     }
     this.authToken = token;
-    this.defaultCommunityId = defaultCommunityId;
   }
 
   /**
@@ -51,13 +48,6 @@ export class SwitchXCore {
    */
   getToken(): string {
     return this.authToken;
-  }
-
-  /**
-   * Get the default community ID (if set)
-   */
-  getDefaultCommunityId(): string | undefined {
-    return this.defaultCommunityId;
   }
 
   /**
@@ -82,16 +72,15 @@ export class SwitchXCore {
 
   /**
    * Get community information
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async getCommunity(communityId?: string): Promise<CommunityInfo> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
-      throw new Error('Community ID is required. Pass communityId or set defaultCommunityId in constructor.');
+  async getCommunity(communityId: string): Promise<CommunityInfo> {
+    if (!communityId) {
+      throw new Error('Community ID is required.');
     }
 
     const data = await this.fetch<any>(
-      `${SWITCH_API_BASE_URL}/community/v1/community?communityId=${id}`
+      `${SWITCH_API_BASE_URL}/community/v1/community?communityId=${communityId}`
     );
 
     return {
@@ -107,16 +96,15 @@ export class SwitchXCore {
 
   /**
    * Get all members of the community
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async getMembers(communityId?: string): Promise<CommunityMember[]> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async getMembers(communityId: string): Promise<CommunityMember[]> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const data = await this.fetch<any>(
-      `${SWITCH_API_BASE_URL}/community/v1/community/users?communityId=${id}`
+      `${SWITCH_API_BASE_URL}/community/v1/community/users?communityId=${communityId}`
     );
 
     return data.result.userInfoList.map((user: any) => ({
@@ -148,16 +136,15 @@ export class SwitchXCore {
 
   /**
    * Get all channels in the community
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async getChannels(communityId?: string): Promise<Channel[]> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async getChannels(communityId: string): Promise<Channel[]> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const data = await this.fetch<any>(
-      `${SWITCH_API_BASE_URL}/community/v1/community/channel/all?communityId=${id}`
+      `${SWITCH_API_BASE_URL}/community/v1/community/channel/all?communityId=${communityId}`
     );
 
     return data.result.map((channel: any) => ({
@@ -169,16 +156,15 @@ export class SwitchXCore {
 
   /**
    * Get all groups in the community
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async getGroups(communityId?: string): Promise<Group[]> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async getGroups(communityId: string): Promise<Group[]> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const data = await this.fetch<any>(
-      `${SWITCH_API_BASE_URL}/community/v1/community/group/all?communityId=${id}`
+      `${SWITCH_API_BASE_URL}/community/v1/community/group/all?communityId=${communityId}`
     );
 
     return data.result.map((group: any) => ({
@@ -191,19 +177,20 @@ export class SwitchXCore {
   /**
    * Get chat history from a channel
    * @param channelId - Channel ID
-   * @param options - Pagination and community options
+   * @param communityId - Community ID (required)
+   * @param options - Pagination options
    */
   async getChannelMessages(
     channelId: string,
-    options: PaginationOptions & { communityId?: string } = {}
+    communityId: string,
+    options: PaginationOptions = {}
   ): Promise<ChatHistory> {
-    const id = options.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const params = new URLSearchParams({
-      communityId: id,
+      communityId,
       channelId,
       pageLimit: (options.limit || 100).toString(),
       pageOffset: (options.offset || 0).toString()
@@ -230,19 +217,20 @@ export class SwitchXCore {
   /**
    * Get chat history from a group
    * @param groupId - Group ID
-   * @param options - Pagination and community options
+   * @param communityId - Community ID (required)
+   * @param options - Pagination options
    */
   async getGroupMessages(
     groupId: string,
-    options: PaginationOptions & { communityId?: string } = {}
+    communityId: string,
+    options: PaginationOptions = {}
   ): Promise<ChatHistory> {
-    const id = options.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const params = new URLSearchParams({
-      communityId: id,
+      communityId,
       groupId,
       limit: (options.limit || 100).toString(),
       offset: (options.offset || 0).toString()
@@ -269,19 +257,20 @@ export class SwitchXCore {
   /**
    * Search messages in the community
    * @param searchString - Text to search for
-   * @param options - Search and community options
+   * @param communityId - Community ID (required)
+   * @param options - Search options
    */
   async searchMessages(
     searchString: string,
-    options: SearchOptions & { communityId?: string } = {}
+    communityId: string,
+    options: SearchOptions = {}
   ): Promise<Message[]> {
-    const id = options.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const params = new URLSearchParams({
-      communityId: id,
+      communityId,
       item: 'MESSAGE',
       limit: (options.limit || 10).toString(),
       page: (options.page || 0).toString(),
@@ -305,16 +294,15 @@ export class SwitchXCore {
   /**
    * Check if a user is an admin
    * @param userId - User ID to check
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async isAdmin(userId: string, communityId?: string): Promise<boolean> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async isAdmin(userId: string, communityId: string): Promise<boolean> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const data = await this.fetch<any>(
-      `${SWITCH_API_BASE_URL}/community/v1/community/user?communityId=${id}&userId=${userId}`
+      `${SWITCH_API_BASE_URL}/community/v1/community/user?communityId=${communityId}&userId=${userId}`
     );
 
     return data.result?.admin || false;
@@ -322,17 +310,16 @@ export class SwitchXCore {
 
   /**
    * Get headings for a community
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    * @param additional - Whether to fetch additional information
    */
-  async getHeadings(communityId?: string, additional = false): Promise<any[]> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async getHeadings(communityId: string, additional = false): Promise<any[]> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const params = new URLSearchParams({
-      communityId: id,
+      communityId,
       additional: additional.toString()
     });
 
@@ -528,25 +515,25 @@ export class SwitchXCore {
    * Send a message to a channel (uses user token)
    * @param channelId - Channel ID
    * @param message - Message text
+   * @param communityId - Community ID (required)
    * @param options - Optional media link, media info, and status
    */
   async sendMessage(
     channelId: string,
     message: string,
+    communityId: string,
     options?: {
-      communityId?: string;
       mediaLink?: string;
       mediaInfo?: Record<string, any>;
       status?: number; // 1=IMAGE, 2=VIDEO, 3=AUDIO, 7=DOCUMENT, 200=STICKER
     }
   ): Promise<any> {
-    const id = options?.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const messageData: any = {
-      communityId: id,
+      communityId,
       channelId,
       message
     };
@@ -581,12 +568,13 @@ export class SwitchXCore {
   /**
    * Create a new channel
    * @param name - Channel name
+   * @param communityId - Community ID (required)
    * @param options - Optional settings
    */
   async createChannel(
     name: string,
+    communityId: string,
     options?: {
-      communityId?: string;
       icon?: string;
       link?: string;
       miniAppLink?: string;
@@ -595,13 +583,12 @@ export class SwitchXCore {
       enabledPublic?: boolean;
     }
   ): Promise<any> {
-    const id = options?.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const channelData: any = {
-      communityId: id,
+      communityId,
       channelName: name,
       isPublic: options?.isPublic !== false,
       enabledFree: options?.enabledFree !== false,
@@ -636,16 +623,15 @@ export class SwitchXCore {
   /**
    * Delete a channel
    * @param channelId - Channel ID to delete
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async deleteChannel(channelId: string, communityId?: string): Promise<any> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async deleteChannel(channelId: string, communityId: string): Promise<any> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const params = new URLSearchParams({
-      communityId: id,
+      communityId,
       channelId
     });
 
@@ -668,25 +654,25 @@ export class SwitchXCore {
   /**
    * Create a new group
    * @param name - Group name
+   * @param communityId - Community ID (required)
    * @param options - Optional settings
    */
   async createGroup(
     name: string,
+    communityId: string,
     options?: {
-      communityId?: string;
       icon?: string;
       isPublic?: boolean;
       enabledFree?: boolean;
       enabledPublic?: boolean;
     }
   ): Promise<any> {
-    const id = options?.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const groupData: any = {
-      communityId: id,
+      communityId,
       groupName: name,
       isPublic: options?.isPublic !== false,
       enabledFree: options?.enabledFree !== false,
@@ -716,16 +702,15 @@ export class SwitchXCore {
   /**
    * Delete a group
    * @param groupId - Group ID to delete
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async deleteGroup(groupId: string, communityId?: string): Promise<any> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async deleteGroup(groupId: string, communityId: string): Promise<any> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const params = new URLSearchParams({
-      communityId: id,
+      communityId,
       groupId
     });
 
@@ -747,12 +732,12 @@ export class SwitchXCore {
 
   /**
    * Update community information
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    * @param updates - Fields to update
    */
   async updateCommunity(
+    communityId: string,
     updates: {
-      communityId?: string;
       communityName?: string;
       communityDescription?: string;
       communityUsername?: string;
@@ -779,16 +764,15 @@ export class SwitchXCore {
       commands?: Array<Record<string, any>>;
     }
   ): Promise<any> {
-    const id = updates.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     // First get current data
-    const currentData = await this.getCommunity(id);
+    const currentData = await this.getCommunity(communityId);
 
     // Merge with updates
-    const body = { ...currentData, communityId: id, ...updates };
+    const body = { ...currentData, communityId, ...updates };
 
     const response = await fetch(`${SWITCH_API_BASE_URL}/community/v1/community`, {
       method: 'PUT',
@@ -811,24 +795,24 @@ export class SwitchXCore {
   /**
    * Add a member to community
    * @param userId - User ID to add
+   * @param communityId - Community ID (required)
    * @param options - Optional settings
    */
   async addMember(
     userId: string,
+    communityId: string,
     options?: {
-      communityId?: string;
       admin?: boolean;
     }
   ): Promise<any> {
-    const id = options?.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const body = {
       communityMembers: [
         {
-          communityId: id,
+          communityId,
           userId,
           admin: options?.admin || false
         }
@@ -856,28 +840,28 @@ export class SwitchXCore {
   /**
    * Create a role in community
    * @param name - Role name
+   * @param communityId - Community ID (required)
    * @param options - Optional settings
    */
   async createRole(
     name: string,
+    communityId: string,
     options?: {
-      communityId?: string;
       colour?: string;
     }
   ): Promise<any> {
-    const id = options?.communityId || this.defaultCommunityId;
-    if (!id) {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const body = {
-      communityId: id,
+      communityId,
       roleName: name,
       roleColour: options?.colour || '#808080'
     };
 
     const response = await fetch(
-      `${SWITCH_API_BASE_URL}/community/v1/community/roles/add?communityId=${id}`,
+      `${SWITCH_API_BASE_URL}/community/v1/community/roles/add?communityId=${communityId}`,
       {
         method: 'POST',
         headers: {
@@ -903,10 +887,12 @@ export class SwitchXCore {
    * Create a reaction on a message
    * @param messageId - Message ID to react to
    * @param emoji - Emoji to react with
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async createReaction(messageId: string, emoji: string, communityId?: string): Promise<void> {
-    const id = communityId || this.defaultCommunityId;
+  async createReaction(messageId: string, emoji: string, communityId: string): Promise<void> {
+    if (!communityId) {
+      throw new Error('Community ID is required');
+    }
 
     const response = await fetch(`${SWITCH_CHAT_API_URL}/chat/v1/react/create`, {
       method: 'POST',
@@ -918,7 +904,7 @@ export class SwitchXCore {
       body: JSON.stringify({
         messageId,
         emoji,
-        communityId: id
+        communityId
       })
     });
 
@@ -931,10 +917,12 @@ export class SwitchXCore {
    * Delete a reaction from a message
    * @param messageId - Message ID to remove reaction from
    * @param emoji - Emoji to remove
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async deleteReaction(messageId: string, emoji: string, communityId?: string): Promise<void> {
-    const id = communityId || this.defaultCommunityId;
+  async deleteReaction(messageId: string, emoji: string, communityId: string): Promise<void> {
+    if (!communityId) {
+      throw new Error('Community ID is required');
+    }
 
     const response = await fetch(`${SWITCH_CHAT_API_URL}/chat/v1/react/delete`, {
       method: 'DELETE',
@@ -946,7 +934,7 @@ export class SwitchXCore {
       body: JSON.stringify({
         messageId,
         emoji,
-        communityId: id
+        communityId
       })
     });
 
@@ -1002,10 +990,12 @@ export class SwitchXCore {
   /**
    * Pin/unpin a message
    * @param messageId - Message ID to pin
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async pinMessage(messageId: string, communityId?: string): Promise<void> {
-    const id = communityId || this.defaultCommunityId;
+  async pinMessage(messageId: string, communityId: string): Promise<void> {
+    if (!communityId) {
+      throw new Error('Community ID is required');
+    }
 
     const response = await fetch(`${SWITCH_CHAT_API_URL}/chat/v1/pin`, {
       method: 'POST',
@@ -1016,7 +1006,7 @@ export class SwitchXCore {
       },
       body: JSON.stringify({
         messageId,
-        communityId: id
+        communityId
       })
     });
 
@@ -1116,16 +1106,15 @@ export class SwitchXCore {
 
   /**
    * Get detailed community information
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async getCommunityDetails(communityId?: string): Promise<any> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async getCommunityDetails(communityId: string): Promise<any> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const data = await this.fetch<any>(
-      `${SWITCH_API_BASE_URL}/community/v1/community?communityId=${id}`
+      `${SWITCH_API_BASE_URL}/community/v1/community?communityId=${communityId}`
     );
     return data;
   }
@@ -1421,15 +1410,14 @@ export class SwitchXCore {
 
   /**
    * Get stickers installed in a community
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async getInstalledStickerPacks(communityId?: string): Promise<any[]> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async getInstalledStickerPacks(communityId: string): Promise<any[]> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
-    const params = new URLSearchParams({ communityId: id });
+    const params = new URLSearchParams({ communityId });
 
     const response = await fetch(`${SWITCH_CHAT_API_URL}/v1/sticker/pack/installed?${params}`, {
       method: 'GET',
@@ -1449,17 +1437,16 @@ export class SwitchXCore {
   /**
    * Install a sticker pack to a community
    * @param stickerPackId - Sticker pack ID to install
-   * @param communityId - Community ID (optional if default is set)
+   * @param communityId - Community ID (required)
    */
-  async installStickerPack(stickerPackId: string, communityId?: string): Promise<any> {
-    const id = communityId || this.defaultCommunityId;
-    if (!id) {
+  async installStickerPack(stickerPackId: string, communityId: string): Promise<any> {
+    if (!communityId) {
       throw new Error('Community ID is required');
     }
 
     const params = new URLSearchParams({
       stickerPackId,
-      communityId: id
+      communityId
     });
 
     const response = await fetch(`${SWITCH_CHAT_API_URL}/v1/sticker/pack/install?${params}`, {
