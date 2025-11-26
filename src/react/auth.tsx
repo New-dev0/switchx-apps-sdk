@@ -29,6 +29,29 @@ declare global {
 }
 
 /**
+ * Theme data from parent SwitchX app
+ */
+interface SwitchXTheme {
+  colorScheme?: 'light' | 'dark';
+  hasImageBackground?: boolean;
+  backgroundImageUrl?: string | null;
+  bg_color?: string;
+  background?: string;
+  text_color?: string;
+  hint_color?: string;
+  link_color?: string;
+  button_color?: string;
+  button_text_color?: string;
+  secondary_bg_color?: string;
+  header_bg_color?: string;
+  accent_text_color?: string;
+  section_bg_color?: string;
+  section_header_text_color?: string;
+  subtitle_text_color?: string;
+  destructive_text_color?: string;
+}
+
+/**
  * Authentication Context Value
  */
 interface SwitchXAuthContextValue {
@@ -51,6 +74,11 @@ interface SwitchXAuthContextValue {
 
   // Pre-configured API client
   client: SwitchXCore | null;
+
+  // Theme state (from parent)
+  theme: SwitchXTheme | null;
+  hasImageBackground: boolean;
+  backgroundImageUrl: string | null;
 }
 
 // Create context
@@ -153,6 +181,11 @@ export function SwitchXAuthProvider({
   const [userLoading, setUserLoading] = useState(false);
   const [communityId, setCommunityId] = useState<string | null>(null);
 
+  // Theme state from parent
+  const [theme, setTheme] = useState<SwitchXTheme | null>(null);
+  const [hasImageBackground, setHasImageBackground] = useState(false);
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
+
   /**
    * Auto-inject SwitchX bridge script if not already loaded
    * Loads from CDN: https://www.switchx.gg/switchx-app-bridge.js
@@ -186,6 +219,70 @@ export function SwitchXAuthProvider({
     };
     document.head.appendChild(script);
   }, []); // Run once on mount
+
+  /**
+   * Listen for parent theme changes via postMessage
+   * Parent sends SWITCHX_THEME message with theme data including image background
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleParentTheme = (event: MessageEvent) => {
+      if (event.data?.type === 'SWITCHX_THEME' && event.data?.theme) {
+        console.log('[SwitchXAuth] Received SWITCHX_THEME from parent:', event.data.theme);
+        const parentTheme = event.data.theme as SwitchXTheme;
+
+        // Update theme state
+        setTheme(parentTheme);
+
+        // Update image background state
+        if (parentTheme.hasImageBackground) {
+          console.log('[SwitchXAuth] Parent has image background:', parentTheme.backgroundImageUrl);
+          setHasImageBackground(true);
+          setBackgroundImageUrl(parentTheme.backgroundImageUrl || null);
+
+          // Apply transparent background to html/body for parent image to show through
+          const root = document.documentElement;
+          root.style.setProperty('--switchx-has-image-bg', 'true');
+          root.style.setProperty('--background', 'transparent');
+          if (parentTheme.backgroundImageUrl) {
+            root.style.setProperty('--switchx-background-image', `url(${parentTheme.backgroundImageUrl})`);
+          }
+          document.body.style.backgroundColor = 'transparent';
+        } else {
+          setHasImageBackground(false);
+          setBackgroundImageUrl(null);
+
+          // Use solid background from parent theme
+          const root = document.documentElement;
+          root.style.setProperty('--switchx-has-image-bg', 'false');
+          if (parentTheme.bg_color || parentTheme.background) {
+            const bgColor = parentTheme.bg_color || parentTheme.background;
+            root.style.setProperty('--background', bgColor!);
+            document.body.style.backgroundColor = bgColor!;
+          }
+        }
+
+        // Apply other theme colors as CSS variables
+        if (parentTheme.text_color) {
+          document.documentElement.style.setProperty('--foreground', parentTheme.text_color);
+        }
+        if (parentTheme.hint_color) {
+          document.documentElement.style.setProperty('--muted-foreground', parentTheme.hint_color);
+        }
+        if (parentTheme.button_color) {
+          document.documentElement.style.setProperty('--primary', parentTheme.button_color);
+        }
+        if (parentTheme.secondary_bg_color) {
+          document.documentElement.style.setProperty('--card', parentTheme.secondary_bg_color);
+          document.documentElement.style.setProperty('--muted', parentTheme.secondary_bg_color);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleParentTheme);
+    return () => window.removeEventListener('message', handleParentTheme);
+  }, []);
 
   // Create API client instance (memoized to avoid recreating on every render)
   const client = useMemo(() => {
@@ -502,6 +599,10 @@ export function SwitchXAuthProvider({
     isEmbedded: typeof window !== 'undefined' && !!window.SwitchX?.WebApp,
     client,
     communityId,
+    // Theme state
+    theme,
+    hasImageBackground,
+    backgroundImageUrl,
   };
 
   return (
