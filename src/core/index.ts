@@ -4,7 +4,6 @@
  * All READ operations that work with any valid token
  *
  * IMPORTANT: This client accepts USER tokens (from SwitchX WebApp)
- * For server-side operations with MINIAPPS_TOKEN, use @switchx/apps-sdk/server
  */
 
 import type {
@@ -16,13 +15,21 @@ import type {
   Group,
   ChatHistory,
   PaginationOptions,
-  SearchOptions
+  SearchOptions,
+  SwitchXDatabaseScope,
+  SwitchXDatabaseRecord,
+  SwitchXDatabaseQueryInput,
+  SwitchXDatabaseGetInput,
+  SwitchXDatabaseInsertInput,
+  SwitchXDatabaseUpdateInput,
+  SwitchXDatabaseDeleteInput
 } from '../types';
 
 // API Configuration
 const SWITCH_API_BASE_URL = "https://gateway.switchx.org/swagger";
 const SWITCH_CHAT_API_URL = "https://chat-api.switchx.org";
 const SWITCH_UPLOAD_URL = "https://de.switchx.dev/upload/stream";
+const SWITCH_RUNTIME_API_URL = "https://runtime-api.switchx.gg";
 
 /**
  * Core SwitchX Client
@@ -31,6 +38,14 @@ const SWITCH_UPLOAD_URL = "https://de.switchx.dev/upload/stream";
  */
 export class SwitchXCore {
   private authToken: string;
+  readonly db = {
+    query: <T = Record<string, any>>(input: SwitchXDatabaseQueryInput<T>) => this.dbQuery<T>(input),
+    find: <T = Record<string, any>>(input: SwitchXDatabaseQueryInput<T>) => this.dbFind<T>(input),
+    get: <T = Record<string, any>>(input: SwitchXDatabaseGetInput) => this.dbGet<T>(input),
+    insert: <T = Record<string, any>>(input: SwitchXDatabaseInsertInput<T>) => this.dbInsert<T>(input),
+    update: <T = Record<string, any>>(input: SwitchXDatabaseUpdateInput<T>) => this.dbUpdate<T>(input),
+    delete: (input: SwitchXDatabaseDeleteInput) => this.dbDelete(input)
+  };
 
   /**
    * Create a new SwitchX client
@@ -68,6 +83,236 @@ export class SwitchXCore {
     }
 
     return response.json() as Promise<T>;
+  }
+
+  /**
+   * Normalize token into Bearer auth header format
+   */
+  private getBearerToken(): string {
+    const token = this.authToken.trim();
+    return /^Bearer\s+/i.test(token) ? token : `Bearer ${token}`;
+  }
+
+  /**
+   * Decode JWT payload and resolve project_id claim
+   */
+  private resolveProjectIdFromToken(): string {
+    const token = this.authToken.trim().replace(/^Bearer\s+/i, '');
+    const parts = token.split('.');
+
+    if (parts.length !== 3 || !parts[1]) {
+      throw new Error('Invalid token format: expected a JWT with three parts.');
+    }
+
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+
+    let decodedPayload = '';
+    try {
+      if (typeof globalThis.atob === 'function') {
+        decodedPayload = decodeURIComponent(
+          Array.from(globalThis.atob(padded))
+            .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+            .join('')
+        );
+      } else {
+        const buffer = (globalThis as any).Buffer;
+        if (!buffer) {
+          throw new Error('Cannot decode token payload in this environment.');
+        }
+        decodedPayload = buffer.from(padded, 'base64').toString('utf-8');
+      }
+    } catch {
+      throw new Error('Invalid token format: failed to decode JWT payload.');
+    }
+
+    let payload: Record<string, any>;
+    try {
+      payload = JSON.parse(decodedPayload);
+    } catch {
+      throw new Error('Invalid token payload: could not parse JWT payload JSON.');
+    }
+
+    const projectId = payload.project_id;
+    if (projectId === undefined || projectId === null || projectId === '') {
+      throw new Error('Invalid token payload: missing project_id claim.');
+    }
+
+    return String(projectId);
+  }
+
+  /**
+   * Send DB requests to runtime API
+   */
+  private async runtimeDatabaseRequest<T>(
+    endpoint: string,
+    body: Record<string, any>,
+    communityId?: string
+  ): Promise<T> {
+    const projectId = this.resolveProjectIdFromToken();
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'Authorization': this.getBearerToken(),
+      'Content-Type': 'application/json',
+      'x-switchx-app-id': projectId
+    };
+
+    if (communityId) {
+      headers['x-switchx-community-id'] = communityId;
+    }
+
+    const response = await fetch(`${SWITCH_RUNTIME_API_URL}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let message = errorText || `HTTP ${response.status}`;
+
+      if (errorText) {
+        try {
+          const parsed = JSON.parse(errorText);
+          message = parsed.message || parsed.error || parsed.detail || message;
+        } catch {
+          // Keep original text as message when non-JSON response
+        }
+      }
+
+      throw new Error(`Runtime database request failed (${response.status}): ${message}`);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    const text = await response.text();
+    if (!text) {
+      return undefined as T;
+    }
+
+    return JSON.parse(text) as T;
+  }
+
+  /**
+   * Resolve DB scope default using community context
+   */
+  private resolveDatabaseScope(scope: SwitchXDatabaseScope | undefined, communityId?: string): SwitchXDatabaseScope {
+    if (scope) {
+      return scope;
+    }
+
+    return communityId ? 'app-community' : 'app';
+  }
+
+  /**
+   * Query DB records
+   */
+  async dbQuery<T = Record<string, any>>(input: SwitchXDatabaseQueryInput<T>): Promise<SwitchXDatabaseRecord<T>[]> {
+    if (!input.table) {
+      throw new Error('Table is required for dbQuery.');
+    }
+
+    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
+    const payload = { ...input, scope };
+    return this.runtimeDatabaseRequest<SwitchXDatabaseRecord<T>[]>(
+      '/v1/database/query',
+      payload,
+      input.communityId
+    );
+  }
+
+  /**
+   * Alias for dbQuery
+   */
+  async dbFind<T = Record<string, any>>(input: SwitchXDatabaseQueryInput<T>): Promise<SwitchXDatabaseRecord<T>[]> {
+    return this.dbQuery<T>(input);
+  }
+
+  /**
+   * Get a single DB record by ID
+   */
+  async dbGet<T = Record<string, any>>(input: SwitchXDatabaseGetInput): Promise<SwitchXDatabaseRecord<T> | null> {
+    if (!input.table) {
+      throw new Error('Table is required for dbGet.');
+    }
+    if (!input.id) {
+      throw new Error('Record id is required for dbGet.');
+    }
+
+    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
+    const payload = { ...input, scope };
+    return this.runtimeDatabaseRequest<SwitchXDatabaseRecord<T> | null>(
+      '/v1/database/get',
+      payload,
+      input.communityId
+    );
+  }
+
+  /**
+   * Insert DB record(s)
+   */
+  async dbInsert<T = Record<string, any>>(
+    input: SwitchXDatabaseInsertInput<T>
+  ): Promise<SwitchXDatabaseRecord<T> | SwitchXDatabaseRecord<T>[]> {
+    if (!input.table) {
+      throw new Error('Table is required for dbInsert.');
+    }
+    if (input.values === undefined || input.values === null) {
+      throw new Error('Values are required for dbInsert.');
+    }
+
+    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
+    const payload = { ...input, scope };
+    return this.runtimeDatabaseRequest<SwitchXDatabaseRecord<T> | SwitchXDatabaseRecord<T>[]>(
+      '/v1/database/insert',
+      payload,
+      input.communityId
+    );
+  }
+
+  /**
+   * Update DB record(s)
+   */
+  async dbUpdate<T = Record<string, any>>(input: SwitchXDatabaseUpdateInput<T>): Promise<SwitchXDatabaseRecord<T>[]> {
+    if (!input.table) {
+      throw new Error('Table is required for dbUpdate.');
+    }
+    if (!input.filter) {
+      throw new Error('Filter is required for dbUpdate.');
+    }
+    if (!input.values || Object.keys(input.values).length === 0) {
+      throw new Error('Values are required for dbUpdate.');
+    }
+
+    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
+    const payload = { ...input, scope };
+    return this.runtimeDatabaseRequest<SwitchXDatabaseRecord<T>[]>(
+      '/v1/database/update',
+      payload,
+      input.communityId
+    );
+  }
+
+  /**
+   * Delete DB record(s)
+   */
+  async dbDelete(input: SwitchXDatabaseDeleteInput): Promise<{ deletedCount?: number; [key: string]: any }> {
+    if (!input.table) {
+      throw new Error('Table is required for dbDelete.');
+    }
+    if (!input.filter) {
+      throw new Error('Filter is required for dbDelete.');
+    }
+
+    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
+    const payload = { ...input, scope };
+    return this.runtimeDatabaseRequest<{ deletedCount?: number; [key: string]: any }>(
+      '/v1/database/delete',
+      payload,
+      input.communityId
+    );
   }
 
   /**

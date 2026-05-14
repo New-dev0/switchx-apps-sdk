@@ -78,3 +78,78 @@ export interface SearchOptions {
   limit?: number;
   page?: number;
 }
+
+export type SwitchXDatabaseScope = 'app' | 'app-community';
+
+export type SwitchXDatabaseValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SwitchXDatabaseValue[]
+  | { [key: string]: SwitchXDatabaseValue };
+
+export type SwitchXDatabaseFilter = Record<
+  string,
+  | SwitchXDatabaseValue
+  | {
+      eq?: SwitchXDatabaseValue;
+      ne?: SwitchXDatabaseValue;
+      gt?: number;
+      gte?: number;
+      lt?: number;
+      lte?: number;
+      in?: SwitchXDatabaseValue[];
+      like?: string;
+      exists?: boolean;
+    }
+>;
+
+export type SwitchXDatabaseRecord<T> = T & {
+  id: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export interface SwitchXDatabaseQueryInput<T = Record<string, any>> {
+  table: string;
+  filter?: SwitchXDatabaseFilter;
+  select?: Array<keyof T | string>;
+  limit?: number;
+  offset?: number;
+  orderBy?: keyof T | string;
+  order?: 'asc' | 'desc';
+  scope?: SwitchXDatabaseScope;
+  communityId?: string;
+}
+
+export interface SwitchXDatabaseGetInput {
+  table: string;
+  id: string;
+  scope?: SwitchXDatabaseScope;
+  communityId?: string;
+}
+
+export interface SwitchXDatabaseInsertInput<T = Record<string, any>> {
+  table: string;
+  values: T | T[];
+  scope?: SwitchXDatabaseScope;
+  communityId?: string;
+}
+
+export interface SwitchXDatabaseUpdateInput<T = Record<string, any>> {
+  table: string;
+  filter: SwitchXDatabaseFilter;
+  values: Partial<T>;
+  limit?: number;
+  scope?: SwitchXDatabaseScope;
+  communityId?: string;
+}
+
+export interface SwitchXDatabaseDeleteInput {
+  table: string;
+  filter: SwitchXDatabaseFilter;
+  limit?: number;
+  scope?: SwitchXDatabaseScope;
+  communityId?: string;
+}

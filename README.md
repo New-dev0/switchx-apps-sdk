@@ -31,7 +31,7 @@ function App() {
 ```typescript
 import { SwitchXCore } from '@switchx/apps-sdk/core';
 
-const client = new SwitchXCore(token, communityId);
+const client = new SwitchXCore(token);
 
 // Read operations
 const community = await client.getCommunity();
@@ -49,24 +49,56 @@ const imageUrl = await client.generateImage('a beautiful sunset');
 const url = await client.uploadFile(file);
 ```
 
-### Server (Node.js)
+### Database (Runtime API)
 
 ```typescript
-import { switchx } from '@switchx/apps-sdk/server';
+import { SwitchXCore } from '@switchx/apps-sdk/core';
 
-switchx.setup(process.env.MINIAPPS_TOKEN, process.env.COMMUNITY_ID);
+const client = new SwitchXCore(token);
 
-// All Core methods + server-specific
-const community = await switchx.getCommunity();
+// Query rows
+const posts = await client.db.query<{ title: string; published: boolean }>({
+  table: 'posts',
+  filter: { published: true },
+  limit: 20
+});
 
-// Upload from Buffer (Node.js only)
-const url = await switchx.uploadFromBuffer(buffer, 'image.png', 'image/png');
+// Query alias
+const samePosts = await client.db.find({
+  table: 'posts',
+  filter: { published: true }
+});
 
-// AI operations
-const response = await switchx.chatWithAI([
-  { role: 'user', content: 'Hello!' }
-]);
+// Community scoped records (scope auto-defaults to app-community when communityId exists)
+const communityPosts = await client.db.query({
+  table: 'posts',
+  communityId: 'community-id'
+});
+
+// CRUD
+const created = await client.db.insert({
+  table: 'posts',
+  values: { title: 'Hello SwitchX', published: false }
+});
+
+const single = await client.db.get({ table: 'posts', id: 'row-id' });
+
+const updated = await client.db.update({
+  table: 'posts',
+  filter: { id: 'row-id' },
+  values: { published: true }
+});
+
+await client.db.delete({
+  table: 'posts',
+  filter: { id: 'row-id' }
+});
 ```
+
+Database auth behavior:
+- Token **must** be a JWT that contains the `project_id` claim.
+- You do **not** pass `projectId` manually to DB methods.
+- SDK derives project routing context from token claim and sends required runtime headers.
 
 ## Key Features
 
@@ -101,7 +133,13 @@ const response = await switchx.chatWithAI([
 
 **File Operations:**
 - `uploadFile(file, filename?)` - Upload file (browser)
-- `uploadFromBuffer(buffer, filename, mimeType)` - Upload (Node.js only)
+
+**Database Operations:**
+- `db.query(input)` / `db.find(input)` - Query records
+- `db.get(input)` - Get record by ID
+- `db.insert(input)` - Insert one or many records
+- `db.update(input)` - Update matching records
+- `db.delete(input)` - Delete matching records
 
 ## React Hooks
 
@@ -122,7 +160,6 @@ All hooks return `{ data, loading, error, refetch }`:
 |--------|-------------|----------|
 | `@switchx/apps-sdk/core` | Universal | Works everywhere (client + server) |
 | `@switchx/apps-sdk/react` | Client-only | React hooks with AuthContext |
-| `@switchx/apps-sdk/server` | Server-only | Node.js Buffer operations |
 
 ## Examples
 
@@ -166,25 +203,11 @@ function AIChat() {
 }
 ```
 
-### Next.js API Route Example
-
-```typescript
-// app/api/community/route.ts
-import { switchx } from '@switchx/apps-sdk/server';
-
-switchx.setup(process.env.MINIAPPS_TOKEN);
-
-export async function GET() {
-  const community = await switchx.getCommunity();
-  return Response.json(community);
-}
-```
-
 ## Environment Variables
 
 ```bash
-MINIAPPS_TOKEN=your-token
-COMMUNITY_ID=your-community-id
+SWITCHX_TOKEN=your-token
+SWITCHX_COMMUNITY_ID=your-community-id
 ```
 
 ## TypeScript

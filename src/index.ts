@@ -5,7 +5,6 @@
  * For specific environments, use subpath imports:
  *
  * - Universal (client + server): import { SwitchXCore } from '@switchx/apps-sdk/core'
- * - Server-only (MINIAPPS_TOKEN): import { switchx } from '@switchx/apps-sdk/server'
  * - React (hooks + auth): import { useAuth, useCommunity } from '@switchx/apps-sdk/react'
  */
 
