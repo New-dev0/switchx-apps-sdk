@@ -112,7 +112,8 @@ export type SwitchXDatabaseRecord<T> = T & {
 };
 
 export interface SwitchXDatabaseQueryInput<T = Record<string, any>> {
-  table: string;
+  collection: string;
+  appId?: string;
   filter?: SwitchXDatabaseFilter;
   select?: Array<keyof T | string>;
   limit?: number;
@@ -124,32 +125,93 @@ export interface SwitchXDatabaseQueryInput<T = Record<string, any>> {
 }
 
 export interface SwitchXDatabaseGetInput {
-  table: string;
+  collection: string;
+  appId?: string;
   id: string;
   scope?: SwitchXDatabaseScope;
   communityId?: string;
 }
 
 export interface SwitchXDatabaseInsertInput<T = Record<string, any>> {
-  table: string;
-  values: T | T[];
+  collection: string;
+  appId?: string;
+  record: T;
   scope?: SwitchXDatabaseScope;
   communityId?: string;
 }
 
 export interface SwitchXDatabaseUpdateInput<T = Record<string, any>> {
-  table: string;
-  filter: SwitchXDatabaseFilter;
-  values: Partial<T>;
-  limit?: number;
+  collection: string;
+  appId?: string;
+  id: string;
+  patch: Partial<T>;
   scope?: SwitchXDatabaseScope;
   communityId?: string;
 }
 
 export interface SwitchXDatabaseDeleteInput {
-  table: string;
-  filter: SwitchXDatabaseFilter;
-  limit?: number;
+  collection: string;
+  appId?: string;
+  id: string;
   scope?: SwitchXDatabaseScope;
   communityId?: string;
+}
+
+export interface SwitchXMultiplayerRegisterAppInput {
+  appId?: string;
+}
+
+export interface SwitchXMultiplayerRegisterAppResponse {
+  appId: string;
+  manifestUrl: string;
+  multiplayerModuleUrl: string;
+  roomTypes: string[];
+  registeredAt: string;
+}
+
+export interface SwitchXMultiplayerResolveRoomInput {
+  room: string;
+  appId?: string;
+  communityId?: string;
+}
+
+export interface SwitchXMultiplayerResolveRoomResponse {
+  appId: string;
+  communityId: string;
+  room: string;
+  roomType: string;
+  communityAppKey: string;
+  roomInstanceId: string;
+  registration: {
+    appId: string;
+    room: string;
+    roomType: string;
+    manifestUrl: string;
+    multiplayerModuleUrl: string;
+    metadata?: Record<string, any>;
+  };
+}
+
+export interface SwitchXMultiplayerJoinRoomInput {
+  room: string;
+  appId?: string;
+  communityId?: string;
+  options?: Record<string, any>;
+}
+
+export interface SwitchXMultiplayerJoinRoomResponse {
+  name: string;
+  appId: string;
+  communityId: string;
+  room: string;
+  roomType: string;
+  communityAppKey: string;
+  roomInstanceId: string;
+  roomId: string;
+  sessionId: string;
+  publicAddress?: string;
+  processId: string;
+  reconnectionToken?: string;
+  devMode?: boolean;
+  wsPath: string;
 }

@@ -22,7 +22,13 @@ import type {
   SwitchXDatabaseGetInput,
   SwitchXDatabaseInsertInput,
   SwitchXDatabaseUpdateInput,
-  SwitchXDatabaseDeleteInput
+  SwitchXDatabaseDeleteInput,
+  SwitchXMultiplayerRegisterAppInput,
+  SwitchXMultiplayerRegisterAppResponse,
+  SwitchXMultiplayerResolveRoomInput,
+  SwitchXMultiplayerResolveRoomResponse,
+  SwitchXMultiplayerJoinRoomInput,
+  SwitchXMultiplayerJoinRoomResponse,
 } from '../types';
 
 // API Configuration
@@ -31,6 +37,22 @@ const SWITCH_CHAT_API_URL = "https://chat-api.switchx.org";
 const SWITCH_UPLOAD_URL = "https://de.switchx.dev/upload/stream";
 const SWITCH_RUNTIME_API_URL = "https://runtime-api.switchx.gg";
 
+interface MiniappSessionExchangeResponse {
+  accessToken: string;
+  tokenType: 'miniapp_session';
+  userId: string;
+  appId: string;
+  communityId?: string;
+  expiresInSeconds: number;
+}
+
+interface RuntimeDatabaseRecordEnvelope<T = Record<string, any>> {
+  id: string;
+  createdAt?: string;
+  updatedAt?: string;
+  data?: T;
+}
+
 /**
  * Core SwitchX Client
  * Universal client that works on both client and server
@@ -38,6 +60,13 @@ const SWITCH_RUNTIME_API_URL = "https://runtime-api.switchx.gg";
  */
 export class SwitchXCore {
   private authToken: string;
+  private appId: string | null = null;
+  private communityId: string | null = null;
+  private miniappSessionToken: string | null = null;
+  private miniappSessionExpiresAtMs = 0;
+  private miniappSessionAppId: string | null = null;
+  private miniappSessionCommunityId: string | null = null;
+  private exchangeInFlight: Promise<string> | null = null;
   readonly db = {
     query: <T = Record<string, any>>(input: SwitchXDatabaseQueryInput<T>) => this.dbQuery<T>(input),
     find: <T = Record<string, any>>(input: SwitchXDatabaseQueryInput<T>) => this.dbFind<T>(input),
@@ -46,16 +75,51 @@ export class SwitchXCore {
     update: <T = Record<string, any>>(input: SwitchXDatabaseUpdateInput<T>) => this.dbUpdate<T>(input),
     delete: (input: SwitchXDatabaseDeleteInput) => this.dbDelete(input)
   };
+  readonly multiplayer = {
+    registerApp: (input: SwitchXMultiplayerRegisterAppInput = {}) => this.multiplayerRegisterApp(input),
+    resolveRoom: (input: SwitchXMultiplayerResolveRoomInput) => this.multiplayerResolveRoom(input),
+    joinRoom: (input: SwitchXMultiplayerJoinRoomInput) => this.multiplayerJoinRoom(input),
+  };
 
   /**
    * Create a new SwitchX client
    * @param token - User authentication token (from SwitchX WebApp)
    */
-  constructor(token: string) {
+  constructor(token: string, userId?: string) {
     if (!token) {
       throw new Error('Token is required. Pass user token from SwitchX WebApp.');
     }
+    void userId;
     this.authToken = token;
+  }
+
+  /**
+   * Set/replace platform auth context without recreating client.
+   */
+  setAuth(token: string, userId: string): void {
+    if (!token) {
+      throw new Error('Token is required in setAuth(token, userId).');
+    }
+    if (!userId) {
+      throw new Error('User ID is required in setAuth(token, userId).');
+    }
+
+    this.authToken = token;
+    this.clearMiniappSessionCache();
+  }
+
+  /**
+   * Configure runtime app context used by DB token exchange.
+   */
+  setAppContext(appId: string, communityId?: string): void {
+    const normalizedAppId = appId?.trim();
+    if (!normalizedAppId) {
+      throw new Error('setAppContext requires a non-empty appId.');
+    }
+
+    this.appId = normalizedAppId;
+    this.communityId = communityId?.trim() || null;
+    this.clearMiniappSessionCache();
   }
 
   /**
@@ -85,23 +149,27 @@ export class SwitchXCore {
     return response.json() as Promise<T>;
   }
 
-  /**
-   * Normalize token into Bearer auth header format
-   */
-  private getBearerToken(): string {
-    const token = this.authToken.trim();
-    return /^Bearer\s+/i.test(token) ? token : `Bearer ${token}`;
+  private getRawToken(): string {
+    return this.authToken.trim().replace(/^Bearer\s+/i, '');
+  }
+
+  private clearMiniappSessionCache(): void {
+    this.miniappSessionToken = null;
+    this.miniappSessionExpiresAtMs = 0;
+    this.miniappSessionAppId = null;
+    this.miniappSessionCommunityId = null;
+    this.exchangeInFlight = null;
   }
 
   /**
    * Decode JWT payload and resolve project_id claim
    */
-  private resolveProjectIdFromToken(): string {
+  private resolveProjectIdFromToken(): string | null {
     const token = this.authToken.trim().replace(/^Bearer\s+/i, '');
     const parts = token.split('.');
 
     if (parts.length !== 3 || !parts[1]) {
-      throw new Error('Invalid token format: expected a JWT with three parts.');
+      return null;
     }
 
     const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -123,22 +191,99 @@ export class SwitchXCore {
         decodedPayload = buffer.from(padded, 'base64').toString('utf-8');
       }
     } catch {
-      throw new Error('Invalid token format: failed to decode JWT payload.');
+      return null;
     }
 
     let payload: Record<string, any>;
     try {
       payload = JSON.parse(decodedPayload);
     } catch {
-      throw new Error('Invalid token payload: could not parse JWT payload JSON.');
+      return null;
     }
 
     const projectId = payload.project_id;
     if (projectId === undefined || projectId === null || projectId === '') {
-      throw new Error('Invalid token payload: missing project_id claim.');
+      return null;
     }
 
     return String(projectId);
+  }
+
+  private resolveAppContext(inputAppId?: string, inputCommunityId?: string): { appId: string; communityId?: string } {
+    const appId =
+      inputAppId?.trim() ||
+      this.appId ||
+      this.resolveProjectIdFromToken() ||
+      null;
+
+    if (!appId) {
+      throw new Error(
+        'Runtime DB auth requires appId. Provide input.appId, call setAppContext(appId[, communityId]), or use a platform token containing project_id.'
+      );
+    }
+
+    const communityId = inputCommunityId?.trim() || this.communityId || undefined;
+    return { appId, communityId };
+  }
+
+  private async exchangeMiniappSession(appId: string, communityId?: string): Promise<string> {
+    const response = await fetch(`${SWITCH_RUNTIME_API_URL}/v1/auth/exchange`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        token: this.getRawToken(),
+        appId,
+        ...(communityId ? { communityId } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let message = errorText || `HTTP ${response.status}`;
+      if (errorText) {
+        try {
+          const parsed = JSON.parse(errorText);
+          message = parsed.message || parsed.error || parsed.detail || message;
+        } catch {
+          // Keep raw response text as fallback message.
+        }
+      }
+
+      throw new Error(`Runtime auth exchange failed (${response.status}): ${message}`);
+    }
+
+    const payload = (await response.json()) as MiniappSessionExchangeResponse;
+    if (!payload?.accessToken || payload.tokenType !== 'miniapp_session') {
+      throw new Error('Runtime auth exchange returned an invalid miniapp session payload.');
+    }
+
+    this.miniappSessionToken = payload.accessToken;
+    this.miniappSessionExpiresAtMs = Date.now() + Math.max(1, payload.expiresInSeconds) * 1000;
+    this.miniappSessionAppId = appId;
+    this.miniappSessionCommunityId = communityId ?? null;
+    return payload.accessToken;
+  }
+
+  private async getMiniappSessionToken(appId: string, communityId?: string): Promise<string> {
+    const now = Date.now();
+    const sameContext = this.miniappSessionAppId === appId && (this.miniappSessionCommunityId ?? null) === (communityId ?? null);
+    const cachedToken = this.miniappSessionToken;
+    const hasValidToken = typeof cachedToken === 'string' && sameContext && this.miniappSessionExpiresAtMs - now > 30000;
+
+    if (hasValidToken) {
+      return cachedToken;
+    }
+
+    if (!this.exchangeInFlight) {
+      this.exchangeInFlight = this.exchangeMiniappSession(appId, communityId).finally(() => {
+        this.exchangeInFlight = null;
+      });
+    }
+
+    return this.exchangeInFlight;
   }
 
   /**
@@ -147,19 +292,17 @@ export class SwitchXCore {
   private async runtimeDatabaseRequest<T>(
     endpoint: string,
     body: Record<string, any>,
+    appId: string,
     communityId?: string
   ): Promise<T> {
-    const projectId = this.resolveProjectIdFromToken();
+    const miniappSessionToken = await this.getMiniappSessionToken(appId, communityId);
     const headers: Record<string, string> = {
       'Accept': 'application/json',
-      'Authorization': this.getBearerToken(),
+      'Authorization': /^Bearer\s+/i.test(miniappSessionToken)
+        ? miniappSessionToken
+        : `Bearer ${miniappSessionToken}`,
       'Content-Type': 'application/json',
-      'x-switchx-app-id': projectId
     };
-
-    if (communityId) {
-      headers['x-switchx-community-id'] = communityId;
-    }
 
     const response = await fetch(`${SWITCH_RUNTIME_API_URL}${endpoint}`, {
       method: 'POST',
@@ -195,6 +338,42 @@ export class SwitchXCore {
     return JSON.parse(text) as T;
   }
 
+  private async runtimeMultiplayerRequest<T>(
+    endpoint: string,
+    body: Record<string, any>,
+    appId: string,
+    communityId?: string
+  ): Promise<T> {
+    const miniappSessionToken = await this.getMiniappSessionToken(appId, communityId);
+    const response = await fetch(`${SWITCH_RUNTIME_API_URL}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': /^Bearer\s+/i.test(miniappSessionToken)
+          ? miniappSessionToken
+          : `Bearer ${miniappSessionToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let message = errorText || `HTTP ${response.status}`;
+      if (errorText) {
+        try {
+          const parsed = JSON.parse(errorText);
+          message = parsed.message || parsed.error || parsed.detail || message;
+        } catch {
+          // Keep raw response text as fallback message.
+        }
+      }
+      throw new Error(`Runtime multiplayer request failed (${response.status}): ${message}`);
+    }
+
+    return (await response.json()) as T;
+  }
+
   /**
    * Resolve DB scope default using community context
    */
@@ -206,21 +385,44 @@ export class SwitchXCore {
     return communityId ? 'app-community' : 'app';
   }
 
+  private normalizeRuntimeRecord<T = Record<string, any>>(
+    record: RuntimeDatabaseRecordEnvelope<T> | null | undefined
+  ): SwitchXDatabaseRecord<T> | null {
+    if (!record) {
+      return null;
+    }
+
+    const data = record.data && typeof record.data === 'object' ? record.data : ({} as T);
+
+    return {
+      ...data,
+      id: record.id,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    } as SwitchXDatabaseRecord<T>;
+  }
+
   /**
    * Query DB records
    */
   async dbQuery<T = Record<string, any>>(input: SwitchXDatabaseQueryInput<T>): Promise<SwitchXDatabaseRecord<T>[]> {
-    if (!input.table) {
-      throw new Error('Table is required for dbQuery.');
+    if (!input.collection) {
+      throw new Error('Collection is required for dbQuery.');
     }
 
-    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
-    const payload = { ...input, scope };
-    return this.runtimeDatabaseRequest<SwitchXDatabaseRecord<T>[]>(
+    const context = this.resolveAppContext(input.appId, input.communityId);
+    const scope = this.resolveDatabaseScope(input.scope, context.communityId);
+    const payload = { ...input, scope } as Record<string, any>;
+    delete payload.appId;
+    const response = await this.runtimeDatabaseRequest<{ items: RuntimeDatabaseRecordEnvelope<T>[] }>(
       '/v1/database/query',
       payload,
-      input.communityId
+      context.appId,
+      context.communityId
     );
+    return (response.items || [])
+      .map((item) => this.normalizeRuntimeRecord<T>(item))
+      .filter((item): item is SwitchXDatabaseRecord<T> => Boolean(item));
   }
 
   /**
@@ -234,20 +436,24 @@ export class SwitchXCore {
    * Get a single DB record by ID
    */
   async dbGet<T = Record<string, any>>(input: SwitchXDatabaseGetInput): Promise<SwitchXDatabaseRecord<T> | null> {
-    if (!input.table) {
-      throw new Error('Table is required for dbGet.');
+    if (!input.collection) {
+      throw new Error('Collection is required for dbGet.');
     }
     if (!input.id) {
       throw new Error('Record id is required for dbGet.');
     }
 
-    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
-    const payload = { ...input, scope };
-    return this.runtimeDatabaseRequest<SwitchXDatabaseRecord<T> | null>(
+    const context = this.resolveAppContext(input.appId, input.communityId);
+    const scope = this.resolveDatabaseScope(input.scope, context.communityId);
+    const payload = { ...input, scope } as Record<string, any>;
+    delete payload.appId;
+    const response = await this.runtimeDatabaseRequest<{ item: RuntimeDatabaseRecordEnvelope<T> | null }>(
       '/v1/database/get',
       payload,
-      input.communityId
+      context.appId,
+      context.communityId
     );
+    return this.normalizeRuntimeRecord<T>(response.item);
   }
 
   /**
@@ -255,64 +461,124 @@ export class SwitchXCore {
    */
   async dbInsert<T = Record<string, any>>(
     input: SwitchXDatabaseInsertInput<T>
-  ): Promise<SwitchXDatabaseRecord<T> | SwitchXDatabaseRecord<T>[]> {
-    if (!input.table) {
-      throw new Error('Table is required for dbInsert.');
+  ): Promise<SwitchXDatabaseRecord<T>> {
+    if (!input.collection) {
+      throw new Error('Collection is required for dbInsert.');
     }
-    if (input.values === undefined || input.values === null) {
-      throw new Error('Values are required for dbInsert.');
+    if (input.record === undefined || input.record === null) {
+      throw new Error('Record is required for dbInsert.');
     }
 
-    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
-    const payload = { ...input, scope };
-    return this.runtimeDatabaseRequest<SwitchXDatabaseRecord<T> | SwitchXDatabaseRecord<T>[]>(
+    const context = this.resolveAppContext(input.appId, input.communityId);
+    const scope = this.resolveDatabaseScope(input.scope, context.communityId);
+    const payload = { ...input, scope } as Record<string, any>;
+    delete payload.appId;
+    const response = await this.runtimeDatabaseRequest<RuntimeDatabaseRecordEnvelope<T>>(
       '/v1/database/insert',
       payload,
-      input.communityId
+      context.appId,
+      context.communityId
     );
+
+    const normalized = this.normalizeRuntimeRecord<T>(response);
+    if (!normalized) {
+      throw new Error('Runtime database insert returned an empty record.');
+    }
+
+    return normalized;
   }
 
   /**
    * Update DB record(s)
    */
-  async dbUpdate<T = Record<string, any>>(input: SwitchXDatabaseUpdateInput<T>): Promise<SwitchXDatabaseRecord<T>[]> {
-    if (!input.table) {
-      throw new Error('Table is required for dbUpdate.');
+  async dbUpdate<T = Record<string, any>>(input: SwitchXDatabaseUpdateInput<T>): Promise<SwitchXDatabaseRecord<T> | null> {
+    if (!input.collection) {
+      throw new Error('Collection is required for dbUpdate.');
     }
-    if (!input.filter) {
-      throw new Error('Filter is required for dbUpdate.');
+    if (!input.id) {
+      throw new Error('Record id is required for dbUpdate.');
     }
-    if (!input.values || Object.keys(input.values).length === 0) {
-      throw new Error('Values are required for dbUpdate.');
+    if (!input.patch || Object.keys(input.patch).length === 0) {
+      throw new Error('Patch is required for dbUpdate.');
     }
 
-    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
-    const payload = { ...input, scope };
-    return this.runtimeDatabaseRequest<SwitchXDatabaseRecord<T>[]>(
+    const context = this.resolveAppContext(input.appId, input.communityId);
+    const scope = this.resolveDatabaseScope(input.scope, context.communityId);
+    const payload = { ...input, scope } as Record<string, any>;
+    delete payload.appId;
+    const response = await this.runtimeDatabaseRequest<{ item: RuntimeDatabaseRecordEnvelope<T> | null }>(
       '/v1/database/update',
       payload,
-      input.communityId
+      context.appId,
+      context.communityId
     );
+    return this.normalizeRuntimeRecord<T>(response.item);
   }
 
   /**
    * Delete DB record(s)
    */
-  async dbDelete(input: SwitchXDatabaseDeleteInput): Promise<{ deletedCount?: number; [key: string]: any }> {
-    if (!input.table) {
-      throw new Error('Table is required for dbDelete.');
+  async dbDelete(input: SwitchXDatabaseDeleteInput): Promise<{ deleted: boolean }> {
+    if (!input.collection) {
+      throw new Error('Collection is required for dbDelete.');
     }
-    if (!input.filter) {
-      throw new Error('Filter is required for dbDelete.');
+    if (!input.id) {
+      throw new Error('Record id is required for dbDelete.');
     }
 
-    const scope = this.resolveDatabaseScope(input.scope, input.communityId);
-    const payload = { ...input, scope };
-    return this.runtimeDatabaseRequest<{ deletedCount?: number; [key: string]: any }>(
+    const context = this.resolveAppContext(input.appId, input.communityId);
+    const scope = this.resolveDatabaseScope(input.scope, context.communityId);
+    const payload = { ...input, scope } as Record<string, any>;
+    delete payload.appId;
+    return this.runtimeDatabaseRequest<{ deleted: boolean }>(
       '/v1/database/delete',
       payload,
-      input.communityId
+      context.appId,
+      context.communityId
     );
+  }
+
+  async multiplayerRegisterApp(
+    input: SwitchXMultiplayerRegisterAppInput = {}
+  ): Promise<SwitchXMultiplayerRegisterAppResponse> {
+    const context = this.resolveAppContext(input.appId, undefined);
+
+    return this.runtimeMultiplayerRequest<SwitchXMultiplayerRegisterAppResponse>('/v1/multiplayer/register-app', {
+      appId: context.appId,
+    }, context.appId);
+  }
+
+  async multiplayerResolveRoom(
+    input: SwitchXMultiplayerResolveRoomInput
+  ): Promise<SwitchXMultiplayerResolveRoomResponse> {
+    if (!input.room) {
+      throw new Error('room is required for multiplayer.resolveRoom().');
+    }
+
+    const context = this.resolveAppContext(input.appId, input.communityId);
+
+    return this.runtimeMultiplayerRequest<SwitchXMultiplayerResolveRoomResponse>('/v1/multiplayer/resolve-room', {
+      room: input.room,
+      appId: context.appId,
+      ...(context.communityId ? { communityId: context.communityId } : {}),
+    }, context.appId, context.communityId);
+  }
+
+  async multiplayerJoinRoom(
+    input: SwitchXMultiplayerJoinRoomInput
+  ): Promise<SwitchXMultiplayerJoinRoomResponse> {
+    if (!input.room) {
+      throw new Error('room is required for multiplayer.joinRoom().');
+    }
+
+    const context = this.resolveAppContext(input.appId, input.communityId);
+
+    return this.runtimeMultiplayerRequest<SwitchXMultiplayerJoinRoomResponse>('/v1/multiplayer/join-room', {
+      room: input.room,
+      appId: context.appId,
+      ...(context.communityId ? { communityId: context.communityId } : {}),
+      ...(input.options ? { options: input.options } : {}),
+    }, context.appId, context.communityId);
   }
 
   /**

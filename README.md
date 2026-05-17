@@ -58,47 +58,64 @@ const client = new SwitchXCore(token);
 
 // Query rows
 const posts = await client.db.query<{ title: string; published: boolean }>({
-  table: 'posts',
+  collection: 'posts',
   filter: { published: true },
   limit: 20
 });
 
+// Returned rows are normalized by SDK from runtime envelope:
+// runtime shape: { id, createdAt, updatedAt, data: {...} }
+// sdk shape: { ...data, id, createdAt, updatedAt }
+console.log(posts[0].title, posts[0].id);
+
 // Query alias
 const samePosts = await client.db.find({
-  table: 'posts',
+  collection: 'posts',
   filter: { published: true }
 });
 
 // Community scoped records (scope auto-defaults to app-community when communityId exists)
 const communityPosts = await client.db.query({
-  table: 'posts',
+  collection: 'posts',
   communityId: 'community-id'
 });
 
 // CRUD
 const created = await client.db.insert({
-  table: 'posts',
-  values: { title: 'Hello SwitchX', published: false }
+  collection: 'posts',
+  record: { title: 'Hello SwitchX', published: false }
 });
+console.log(created.title, created.id);
 
-const single = await client.db.get({ table: 'posts', id: 'row-id' });
+const single = await client.db.get({ collection: 'posts', id: 'row-id' });
 
 const updated = await client.db.update({
-  table: 'posts',
-  filter: { id: 'row-id' },
-  values: { published: true }
+  collection: 'posts',
+  id: 'row-id',
+  patch: { published: true }
 });
 
 await client.db.delete({
-  table: 'posts',
-  filter: { id: 'row-id' }
+  collection: 'posts',
+  id: 'row-id'
 });
 ```
 
 Database auth behavior:
-- Token **must** be a JWT that contains the `project_id` claim.
-- You do **not** pass `projectId` manually to DB methods.
-- SDK derives project routing context from token claim and sends required runtime headers.
+- SDK lazily exchanges your platform token for a miniapp-session token via `/v1/auth/exchange` before DB calls.
+- DB methods use the exchanged miniapp-session token automatically.
+- SDK resolves `appId` from `input.appId`, `client.setAppContext(appId[, communityId])`, or `project_id` claim fallback.
+- If no app context is available, SDK throws a clear error describing how to provide `appId`.
+
+Example app context setup:
+
+```typescript
+const client = new SwitchXCore(token);
+client.setAuth(token, userId); // public API remains supported
+client.setAppContext('my-miniapp', 'community-id');
+
+await client.db.query({ collection: 'posts' });
+```
 
 ## Key Features
 

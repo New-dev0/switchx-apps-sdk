@@ -161,6 +161,7 @@ interface SwitchXAuthProviderProps {
    * Example: 'https://switchx.gg'
    */
   parentOrigin?: string;
+  appId?: string;
 }
 
 /**
@@ -171,7 +172,8 @@ export function SwitchXAuthProvider({
   children,
   onAuthChange,
   notifyParent = true,
-  parentOrigin = '*'
+  parentOrigin = '*',
+  appId,
 }: SwitchXAuthProviderProps) {
   const [token, setToken] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -286,8 +288,33 @@ export function SwitchXAuthProvider({
 
   // Create API client instance (memoized to avoid recreating on every render)
   const client = useMemo(() => {
-    return token ? new SwitchXCore(token) : null;
-  }, [token]);
+    if (!token) return null;
+
+    const nextClient = new SwitchXCore(token);
+    const resolvedAppId = String(appId || '').trim();
+    if (resolvedAppId) {
+      try {
+        nextClient.setAppContext(resolvedAppId, communityId || undefined);
+      } catch (e) {
+        console.warn('[SwitchXAuth] Failed to set app context during client init:', e);
+      }
+    }
+
+    return nextClient;
+  }, [token, appId, communityId]);
+
+  useEffect(() => {
+    if (!client) return;
+
+    const resolvedAppId = String(appId || '').trim();
+    if (!resolvedAppId) return;
+
+    try {
+      client.setAppContext(resolvedAppId, communityId || undefined);
+    } catch (e) {
+      console.warn('[SwitchXAuth] Failed to set app context:', e);
+    }
+  }, [client, appId, communityId]);
 
   /**
    * Fetch user information using the stored token and userId
